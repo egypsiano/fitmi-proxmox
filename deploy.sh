@@ -2,12 +2,12 @@
 
 # Set variables
 CONTAINER_ID=150
-CONTAINER_NAME="workout-platform"
+CONTAINER_NAME="fitmi-proxmox"
 IMAGE="debian:bookworm"  # or "ubuntu:jammy"
 IP_ADDRESS="192.168.1.200"  # Change to your desired IP
 SSH_USER="root"
-APP_DIR="/root/workout-platform"
-GIT_REPO="https://github.com/yourusername/workout-platform.git" 
+APP_DIR="/root/fitmi-proxmox"
+GIT_REPO="https://github.com/egypsiano/fitmi-proxmox.git" 
 
 echo "🚀 Starting Proxmox Deployment Script..."
 
