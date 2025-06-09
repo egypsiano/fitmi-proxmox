@@ -7,4 +7,4 @@ A full-featured fitness platform with workout tracking, meal planning, Apple Wat
 Run this command on your Proxmox host:
 
 ```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/egypsiano/fitme-proxmox/main/ct/fitme-proxmox.sh)" 
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/egypsiano/fitmi-proxmox/main/ct/fitme-proxmox.sh)" 
