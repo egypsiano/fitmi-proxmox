@@ -42,8 +42,8 @@ catch_errors
 header_info "FitMe Prox"
 
 APP="FitMe Prox"
-TELEGRAM_BOT_TOKEN="7937344020:AAEKyykBOWSmXibUf1UBMj4Drvfu3LeKSY4"
-CHAT_ID="RediFitmiBot"
+TELEGRAM_BOT_TOKEN="token"
+CHAT_ID="id"
 
 # ============ Telegram Notification ============
 function telegram_notify() {
