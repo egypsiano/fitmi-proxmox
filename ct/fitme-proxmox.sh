@@ -1,29 +1,51 @@
-#!/usr/bin/env bash
+#!/bin/bash
 
-source <(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/misc/build.func) 
+# ============ Internal Functions ============
+function variables() {
+    var_os=${var_os:-debian}
+    var_version=${var_version:-12}
+    var_unprivileged=${var_unprivileged:-1}
+    var_cpu=${var_cpu:-4}
+    var_ram=${var_ram:-8192}
+    var_disk=${var_disk:-20}
+}
 
-# Copyright (c) 2025 egypsiano
-# Author: havardthom
-# License: MIT | https://github.com/community-scripts/ProxmoxVE/raw/main/LICENSE   
-# Source: https://openwebui.com/ 
+function color() {
+    RED='\033[0;31m'
+    GREEN='\033[0;32m'
+    NC='\033[0m'
+    BOLDGREEN='\033[1;32m'
+    BOLDRED='\033[1;31m'
+}
 
+function header_info() {
+    echo -e "\n\n${BOLDGREEN}== $* ==${NC}\n"
+}
+
+function msg_ok() {
+    echo -e "${GREEN}$*${NC}"
+}
+
+function msg_error() {
+    echo -e "${RED}$*${NC}"
+    exit 1
+}
+
+function catch_errors() {
+    trap 'msg_error "An error occurred during deployment.";' ERR
+}
+
+# ============ Variables ============
 APP="FitMe Prox"
-var_tags="${var_tags:-fitness;workout}"
-var_cpu="${var_cpu:-4}"
-var_ram="${var_ram:-8192}"
-var_disk="${var_disk:-20}"
-var_os="${var_os:-debian}"
-var_version="${var_version:-12}"
-var_unprivileged="${var_unprivileged:-1}"
-
 TELEGRAM_BOT_TOKEN="7937344020:AAEKyykBOWSmXibUf1UBMj4Drvfu3LeKSY4"
 CHAT_ID="RediFitmiBot"
 
-header_info "$APP"
 variables
 color
 catch_errors
+header_info "$APP"
 
+# ============ Telegram Notification ============
 function telegram_notify() {
   if [[ -z "$TELEGRAM_BOT_TOKEN" || -z "$CHAT_ID" ]]; then
     echo "Telegram notification skipped: missing token or chat ID."
@@ -35,58 +57,103 @@ function telegram_notify() {
     -d text="$1"
 }
 
-function update_script() {
-  header_info
-  check_container_storage
-  check_container_resources
-  if [[ ! -d /opt/fitme-proxmox ]]; then
-    msg_error "No ${APP} Installation Found!"
-    exit
+# ============ Main Deployment ============
+CONTAINER_ID=100
+CONTAINER_NAME="fitme-proxmox"
+OSTEMPLATE="debian:bookworm"
+IS_PRIVILEGED=true
+DISK_SIZE="20G"
+BRIDGE="vmbr0"
+IP_METHOD="dhcp"
+IP_ADDRESS=""
+DNS_SERVERS=("8.8.8.8" "8.8.4.4")
+ROOT_PASSWORD=""
+
+# ============ Wizard Steps ============
+echo "🚀 Welcome to the FitMe Prox Deployment Wizard"
+
+# Choose Container ID
+read -p "Enter container ID [default: $CONTAINER_ID]: " input
+CONTAINER_ID=${input:-$CONTAINER_ID}
+
+# Choose OS Template
+read -p "Choose OS template [default: $OSTEMPLATE]: " input
+OSTEMPLATE=${input:-$OSTEMPLATE}
+
+# Choose Privileged or Unprivileged
+read -p "Should the container be privileged? [y/n] (default: y): " answer
+IS_PRIVILEGED=$(echo "$answer" | tr '[:upper:]' '[:lower:]')
+IS_PRIVILEGED=${IS_PRIVILEGED:-yes}
+
+# Set Root Password
+while true; do
+  read -p "Enter root password for the container: " ROOT_PASSWORD
+  read -p "Re-enter root password: " CONFIRM_PASSWORD
+  if [[ "$ROOT_PASSWORD" == "$CONFIRM_PASSWORD" ]]; then
+    break
+  else
+    msg_error "Passwords do not match. Please try again."
   fi
+done
 
-  msg_info "Updating ${APP} (Patience)"
-  cd /opt/fitme-proxmox
+# Create LXC Container
+qm create "$CONTAINER_ID" \
+  --name "$CONTAINER_NAME" \
+  --ostemplate "$OSTEMPLATE" \
+  --memory "$var_ram" \
+  --swap 512 \
+  --rootfs local-lvm:$DISK_SIZE \
+  --net0 name=eth0,bridge=$BRIDGE,model=virtio \
+  --ipconfig0 ip="$IP_ADDRESS",gw="192.168.1.1",dns="${DNS_SERVERS[*]}" \
+  --unprivileged $([[ "$IS_PRIVILEGED" == "no" ]] && echo "1" || echo "0") || msg_error "Failed to create container."
 
-  # Backup existing data before updating
-  mkdir -p /opt/fitme-proxmox-backup
-  cp -rf /opt/fitme-proxmox/data /opt/fitme-proxmox-backup
+# Set root password
+qm set "$CONTAINER_ID" --password "$ROOT_PASSWORD" || msg_error "Failed to set root password."
 
-  # Pull latest changes from Git
-  git add -A
-  $STD git stash
-  $STD git reset --hard
-  output=$(git pull --no-rebase)
-  if echo "$output" | grep -q "Already up to date."; then
-    msg_ok "${APP} is already up to date."
-    exit
-  fi
+# Start container
+qm start "$CONTAINER_ID" || msg_error "Failed to start container."
 
-  systemctl stop fitme-proxmox.service || true
-  $STD docker-compose build
-  $STD docker-compose down
-  $STD docker-compose up -d
+# Wait until online
+until ping -c 1 "$IP_ADDRESS" &> /dev/null; do
+  echo -n "."
+  sleep 1
+done
+echo -e "\nContainer is online!"
 
-  # Restore user data
-  cp -rf /opt/fitme-proxmox-backup/* /opt/fitme-proxmox/data
+# Install dependencies and deploy app
+sshpass -p "$ROOT_PASSWORD" ssh -o StrictHostKeyChecking=no root@$IP_ADDRESS << EOF
+set -e
 
-  # Pop any stashed changes
-  if git stash list | grep -q 'stash@{'; then
-    $STD git stash pop
-  fi
+apt update && apt upgrade -y
+apt install -y sudo git curl wget gnupg lsb-release
 
-  systemctl start fitme-proxmox.service || true
-  telegram_notify "🔄 $APP was updated successfully on http://$IP:3000"
-  msg_ok "Updated Successfully"
-  exit
-}
+curl -fsSL https://download.docker.com/linux/debian/gpg  | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/debian  $(lsb_release -cs) stable" > /etc/apt/sources.list.d/docker.list
 
-start
-build_container
-description
+apt update
+apt install -y docker-ce docker-ce-cli containerd.io
+
+systemctl enable docker
+systemctl start docker
+
+APP_DIR="/opt/fitme-proxmox"
+GIT_REPO="https://github.com/egypsiano/fitme-proxmox.git" 
+
+git clone "$GIT_REPO" "$APP_DIR"
+cd "$APP_DIR"
+
+docker-compose build
+docker-compose up -d
+
+echo "✅ Deployment complete. Access your app at http://$IP_ADDRESS:3000"
+EOF
+
+# Send Telegram notification
+telegram_notify "✅ $APP was deployed successfully on http://$IP_ADDRESS:3000"
 
 msg_ok "Completed Successfully!\n"
-echo -e "${CREATING}${GN}${APP} setup has been successfully initialized!${CL}"
-echo -e "${INFO}${YW} Access it using the following URL:${CL}"
-echo -e "${TAB}${GATEWAY}${BGN}http://${IP}:3000${CL}"
+echo -e "${CREATING}${GREEN}${APP} setup has been successfully initialized!${NC}"
+echo -e "${INFO}${YELLOW} Access it using the following URL:${NC}"
+echo -e "${TAB}${GREEN}http://${IP_ADDRESS}:3000${NC}"
 
-telegram_notify "✅ $APP was deployed successfully on http://$IP:3000"
+exit 0
