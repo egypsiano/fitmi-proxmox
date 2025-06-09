@@ -1,0 +1,116 @@
+#!/bin/bash
+
+# ============ Internal Functions ============
+function variables() {
+    var_os=${var_os:-debian}
+    var_version=${var_version:-12}
+    var_unprivileged=${var_unprivileged:-1}
+    var_cpu=${var_cpu:-4}
+    var_ram=${var_ram:-8192}
+    var_disk=${var_disk:-20}
+}
+
+function color() {
+    RED='\033[0;31m'
+    GREEN='\033[0;32m'
+    YELLOW='\033[0;33m'
+    NC='\033[0m'
+    BOLDGREEN='\033[1;32m'
+    BOLDRED='\033[1;31m'
+}
+
+function header_info() {
+    echo -e "\n\n${BOLDGREEN}== $* ==${NC}\n"
+}
+
+function msg_ok() {
+    echo -e "${GREEN}$*${NC}"
+}
+
+function msg_error() {
+    echo -e "${RED}$*${NC}"
+    exit 1
+}
+
+function catch_errors() {
+    trap 'msg_error "An error occurred during deployment.";' ERR
+}
+
+# ============ Helper Functions ============
+function check_container_resources() {
+    local container_id=$1
+    local ram_limit=$((var_ram * 1024))
+    local cpu_limit=$var_cpu
+
+    # Check RAM usage
+    local ram_used=$(pct info "$container_id" | grep "memory:" | awk '{print $2}')
+    if (( ram_used > ram_limit )); then
+        msg_error "Container $container_id exceeds memory limit of $var_ram MB."
+    fi
+
+    # Check CPU usage
+    local cpu_used=$(pct info "$container_id" | grep "cpus:" | awk '{print $2}')
+    if (( cpu_used > cpu_limit )); then
+        msg_error "Container $container_id exceeds CPU limit of $var_cpu cores."
+    fi
+}
+
+function check_container_storage() {
+    local storage_path="/etc/pve/lxc/$CONTAINER_ID.conf"
+    if [[ -f "$storage_path" && $(grep -c 'rootfs' "$storage_path") -eq 0 ]]; then
+        msg_error "No rootfs found in container config. Aborting."
+    fi
+}
+
+function update_script() {
+    header_info
+    check_container_storage
+    check_container_resources
+    if [[ ! -d /opt/fitme-proxmox ]]; then
+        msg_error "No ${APP} Installation Found!"
+        exit
+    fi
+
+    msg_info "Updating ${APP} (Patience)"
+    cd /opt/fitme-proxmox
+
+    mkdir -p /opt/fitme-proxmox-backup
+    cp -rf /opt/fitme-proxmox/data /opt/fitme-proxmox-backup
+
+    git add -A
+    $STD git stash
+    $STD git reset --hard
+    output=$(git pull --no-rebase)
+    if echo "$output" | grep -q "Already up to date."; then
+        msg_ok "${APP} is already up to date."
+        exit
+    fi
+
+    systemctl stop fitme-proxmox.service || true
+    $STD docker-compose build
+    $STD docker-compose down
+    $STD docker-compose up -d
+
+    cp -rf /opt/fitme-proxmox-backup/* /opt/fitme-proxmox/data
+
+    if git stash list | grep -q 'stash@{'; then
+        $STD git stash pop
+    fi
+
+    systemctl start fitme-proxmox.service || true
+    msg_ok "Updated Successfully"
+    exit
+}
+
+function description() {
+    msg_info "FitMe Prox is a self-hosted workout and nutrition tracking platform."
+    msg_info "It includes meal planning, weight tracking, Apple Watch integration, and more."
+}
+
+function start() {
+    if [[ -z "$CONTAINER_NAME" || -z "$CONTAINER_ID" ]]; then
+        msg_error "Missing container name or ID."
+    fi
+}
+
+# ============ End of build.func ============
