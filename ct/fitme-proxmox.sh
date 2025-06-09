@@ -83,6 +83,26 @@ if [[ "$ROOT_PASSWORD" != "$CONFIRM_PASSWORD" ]]; then
     msg_error "Passwords do not match. Please try again."
 fi
 
+# ============ Check If Container Already Exists ============
+if pct list | grep -q "$CONTAINER_NAME"; then
+    echo -e "${YELLOW}⚠️ A container named '$CONTAINER_NAME' already exists.${NC}"
+    read -p "Would you like to remove it and recreate it? [y/n]: " choice
+    case "$choice" in
+        y|Y) 
+            pct stop "$CONTAINER_NAME" || true
+            pct destroy "$CONTAINER_NAME" || true
+            rm -f /etc/pve/lxc/"$CONTAINER_NAME".conf || true
+            echo "Removed existing container."
+            ;;
+        n|N)
+            msg_error "Deployment cancelled. Choose another container name or remove the existing one manually."
+            ;;
+        *) 
+            msg_error "Invalid choice. Deployment cancelled."
+            ;;
+    esac
+fi
+
 # ============ Create Container (Proxmox 8.x compatible) ============
 header_info "Creating LXC Container..."
 
