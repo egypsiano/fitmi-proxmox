@@ -1,7 +1,5 @@
 #!/bin/bash
-
-source ./build.func
-
+source <(curl -fsSL https://github.com/egypsiano/fitmi-proxmox/raw/refs/heads/main/build.func)
 # ============ Internal Functions ============
 function variables() {
     var_os=${var_os:-debian}
