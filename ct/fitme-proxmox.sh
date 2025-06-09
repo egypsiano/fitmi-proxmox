@@ -63,6 +63,9 @@ IS_PRIVILEGED=true
 ROOT_PASSWORD="000000"
 IP_ADDRESS="192.168.1.100"
 BRIDGE="vmbr0"
+DISK_SIZE="20G"
+RAM_SIZE="8192"
+CPU_CORES="4"
 
 # ============ Wizard Steps ============
 echo "🚀 Welcome to the FitMe Prox Deployment Wizard"
@@ -83,18 +86,37 @@ fi
 # ============ Create Container (Proxmox 8.x compatible) ============
 header_info "Creating LXC Container..."
 
+# Create the container using lxc-create
 lxc-create -n "$CONTAINER_NAME" -t download -- --dist debian --release bookworm --arch amd64 || msg_error "Failed to create container."
 
-qm set "$CONTAINER_ID" --unprivileged $([[ "$IS_PRIVILEGED" == "no" ]] && echo "1" || echo "0") || msg_error "Failed to set unprivileged mode."
+# Get the container ID from its name
+CONTAINER_ID=$(pct list | grep "$CONTAINER_NAME" | awk '{print $1}')
 
-qm set "$CONTAINER_ID" --memory "$var_ram" --swap 512 --cores "$var_cpu" || msg_error "Failed to set container resources."
+# Set basic resources via pct
+pct set "$CONTAINER_ID" --memory "$RAM_SIZE" --swap 512 --cores "$CPU_CORES" || msg_error "Failed to set container resources."
 
-qm set "$CONTAINER_ID" --net0 name=eth0,bridge=$BRIDGE,model=virtio || msg_error "Failed to configure network."
+# Set network bridge and IP manually in config
+echo "Configuring networking..."
+cat <<EOF >> /etc/pve/lxc/$CONTAINER_ID.conf
+lxc.network.type = veth
+lxc.network.link = $BRIDGE
+lxc.network.flags = up
+lxc.network.hwaddr = $(openssl rand -hex 6 | sed 's/\(..\)/\1:/g; s/.$//')
+lxc.network.ipv4 = $IP_ADDRESS/24
+lxc.network.ipv4.gateway = 192.168.1.1
+lxc.network.ipv4.dns = 8.8.8.8,8.8.4.4
+EOF
 
-qm set "$CONTAINER_ID" --ipconfig0 ip=$IP_ADDRESS,gw=192.168.1.1,dns=8.8.8.8,dns=8.8.4.4 || msg_error "Failed to set IP configuration."
+# Set unprivileged mode in config
+echo "Setting unprivileged mode..."
+sed -i '/^lxc.idmap/d' /etc/pve/lxc/$CONTAINER_ID.conf
+cat <<EOF >> /etc/pve/lxc/$CONTAINER_ID.conf
+lxc.idmap = u 0 100000 65536
+lxc.idmap = g 0 100000 65536
+EOF
 
 # Start container
-qm start "$CONTAINER_ID" || msg_error "Failed to start container."
+lxc-start -n "$CONTAINER_NAME" || msg_error "Failed to start container."
 
 # Wait until online
 until ping -c 1 "$IP_ADDRESS" &> /dev/null; do
@@ -107,8 +129,14 @@ echo -e "\nContainer is online!"
 sshpass -p "$ROOT_PASSWORD" ssh -o StrictHostKeyChecking=no root@$IP_ADDRESS << EOF
 set -e
 
+# Set root password
+echo "root:$ROOT_PASSWORD" | chpasswd
+
 apt update && apt upgrade -y
-apt install -y sudo git curl wget gnupg lsb-release
+apt install -y sudo git curl wget gnupg lsb-release openssh-server
+
+systemctl enable ssh
+systemctl restart ssh
 
 curl -fsSL https://download.docker.com/linux/debian/gpg  | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
 echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/debian  $(lsb_release -cs) stable" > /etc/apt/sources.list.d/docker.list
