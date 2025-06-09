@@ -1,5 +1,7 @@
 #!/bin/bash
 
+source ./build.func
+
 # ============ Internal Functions ============
 function variables() {
     var_os=${var_os:-debian}
@@ -42,8 +44,8 @@ catch_errors
 header_info "FitMe Prox"
 
 APP="FitMe Prox"
-TELEGRAM_BOT_TOKEN="your_telegram_bot_token"
-CHAT_ID="your_telegram_chat_id"
+TELEGRAM_BOT_TOKEN="7937344020:AAEKyykBOWSmXibUf1UBMj4Drvfu3LeKSY4"
+CHAT_ID="RediFitmiBot"
 
 # ============ Telegram Notification ============
 function telegram_notify() {
