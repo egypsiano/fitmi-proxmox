@@ -71,8 +71,8 @@ CPU_CORES="4"
 # ============ Wizard Steps ============
 echo "🚀 Welcome to the FitMe Prox Deployment Wizard"
 
-read -p "Enter container name [default: $CONTAINER_NAME]: " input
-CONTAINER_NAME=${input:-$CONTAINER_NAME}
+read -p "Enter container ID [default: 100]: " input
+CONTAINER_ID=${input:-100}
 
 read -p "Should the container be privileged? [y/n] (default: y): " answer
 IS_PRIVILEGED=$(echo "$answer" | tr '[:upper:]' '[:lower:]')
@@ -85,18 +85,18 @@ if [[ "$ROOT_PASSWORD" != "$CONFIRM_PASSWORD" ]]; then
 fi
 
 # ============ Check If Container Already Exists ============
-if pct list | grep -q "$CONTAINER_NAME"; then
-    echo -e "${YELLOW}⚠️ A container named '$CONTAINER_NAME' already exists.${NC}"
+if pct list | grep -q "$CONTAINER_ID"; then
+    echo -e "${YELLOW}⚠️ A container with ID '$CONTAINER_ID' already exists.${NC}"
     read -p "Would you like to remove it and recreate it? [y/n]: " choice
     case "$choice" in
         y|Y) 
-            pct stop "$CONTAINER_NAME" || true
-            pct destroy "$CONTAINER_NAME" || true
-            rm -f /etc/pve/lxc/"$CONTAINER_NAME".conf || true
+            pct stop "$CONTAINER_ID" || true
+            pct destroy "$CONTAINER_ID" || true
+            rm -f /etc/pve/lxc/"$CONTAINER_ID".conf || true
             echo "Removed existing container."
             ;;
         n|N)
-            msg_error "Deployment cancelled. Choose another container name or remove the existing one manually."
+            msg_error "Deployment cancelled. Choose another container ID or remove the existing one manually."
             ;;
         *) 
             msg_error "Invalid choice. Deployment cancelled."
