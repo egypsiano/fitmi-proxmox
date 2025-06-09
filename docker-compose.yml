@@ -1,0 +1,40 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: fitme-proxmox-backend
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./data:/app/data
+      - /mnt/uploads:/mnt/uploads
+    environment:
+      MONGO_URI: mongodb://admin:password@mongodb:27017/fitme-proxmox?authSource=admin
+      JWT_SECRET: your_jwt_secret
+      TELEGRAM_BOT_TOKEN: your_telegram_token
+      CHAT_ID: your_chat_id
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: fitme-proxmox-frontend
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+
+  mongodb:
+    image: mongo:6.0
+    container_name: fitme-proxmox-mongo
+    volumes:
+      - mongo-data:/data/db
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: password
+
+volumes:
+  mongo-data:
