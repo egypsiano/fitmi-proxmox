@@ -35,15 +35,14 @@ function catch_errors() {
     trap 'msg_error "An error occurred during deployment.";' ERR
 }
 
-# ============ Variables ============
-APP="FitMe Prox"
-TELEGRAM_BOT_TOKEN="7937344020:AAEKyykBOWSmXibUf1UBMj4Drvfu3LeKSY4"
-CHAT_ID="RediFitmiBot"
-
 variables
 color
 catch_errors
-header_info "$APP"
+header_info "FitMe Prox"
+
+APP="FitMe Prox"
+TELEGRAM_BOT_TOKEN="your_telegram_bot_token"
+CHAT_ID="your_telegram_chat_id"
 
 # ============ Telegram Notification ============
 function telegram_notify() {
@@ -57,24 +56,23 @@ function telegram_notify() {
     -d text="$1"
 }
 
-# ============ Main Deployment ============
-CONTAINER_ID=100
+# ============ Variables ============
 CONTAINER_NAME="fitme-proxmox"
 OSTEMPLATE="debian:bookworm"
-IS_PRIVILEGED=true
 DISK_SIZE="20G"
 BRIDGE="vmbr0"
 IP_METHOD="dhcp"
 IP_ADDRESS=""
 DNS_SERVERS=("8.8.8.8" "8.8.4.4")
-ROOT_PASSWORD=""
+IS_PRIVILEGED=true
+ROOT_PASSWORD="000000"
 
 # ============ Wizard Steps ============
 echo "🚀 Welcome to the FitMe Prox Deployment Wizard"
 
-# Choose Container ID
-read -p "Enter container ID [default: $CONTAINER_ID]: " input
-CONTAINER_ID=${input:-$CONTAINER_ID}
+# Choose Container Name
+read -p "Enter container name [default: $CONTAINER_NAME]: " input
+CONTAINER_NAME=${input:-$CONTAINER_NAME}
 
 # Choose OS Template
 read -p "Choose OS template [default: $OSTEMPLATE]: " input
@@ -96,22 +94,20 @@ while true; do
   fi
 done
 
-# Create LXC Container
-qm create "$CONTAINER_ID" \
-  --name "$CONTAINER_NAME" \
-  --ostemplate "$OSTEMPLATE" \
-  --memory "$var_ram" \
-  --swap 512 \
-  --rootfs local-lvm:$DISK_SIZE \
-  --net0 name=eth0,bridge=$BRIDGE,model=virtio \
-  --ipconfig0 ip="$IP_ADDRESS",gw="192.168.1.1",dns="${DNS_SERVERS[*]}" \
-  --unprivileged $([[ "$IS_PRIVILEGED" == "no" ]] && echo "1" || echo "0") || msg_error "Failed to create container."
-
-# Set root password
-qm set "$CONTAINER_ID" --password "$ROOT_PASSWORD" || msg_error "Failed to set root password."
+# ============ Create LXC Container (Proxmox 8.x compatible) ============
+lxc-create -n "$CONTAINER_NAME" -t download -- --dist debian --release bookworm --arch amd64 \
+  --storage local-lvm \
+  --size "$DISK_SIZE" \
+  --userpasswd "$ROOT_PASSWORD" \
+  --rootfs-size "$DISK_SIZE" \
+  --network-bridge "$BRIDGE" \
+  --network-ip "$IP_ADDRESS" \
+  --network-gateway "192.168.1.1" \
+  --network-dns "${DNS_SERVERS[*]}" \
+  --privileged $([[ "$IS_PRIVILEGED" == "yes" ]] && echo "1" || echo "0") || msg_error "Failed to create container."
 
 # Start container
-qm start "$CONTAINER_ID" || msg_error "Failed to start container."
+lxc-start -n "$CONTAINER_NAME" || msg_error "Failed to start container."
 
 # Wait until online
 until ping -c 1 "$IP_ADDRESS" &> /dev/null; do
@@ -120,7 +116,7 @@ until ping -c 1 "$IP_ADDRESS" &> /dev/null; do
 done
 echo -e "\nContainer is online!"
 
-# Install dependencies and deploy app
+# ============ Install App Inside Container ============
 sshpass -p "$ROOT_PASSWORD" ssh -o StrictHostKeyChecking=no root@$IP_ADDRESS << EOF
 set -e
 
