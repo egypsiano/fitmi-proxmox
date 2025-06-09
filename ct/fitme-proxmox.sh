@@ -58,56 +58,43 @@ function telegram_notify() {
 
 # ============ Variables ============
 CONTAINER_NAME="fitme-proxmox"
-OSTEMPLATE="debian:bookworm"
-DISK_SIZE="20G"
-BRIDGE="vmbr0"
-IP_METHOD="dhcp"
-IP_ADDRESS=""
-DNS_SERVERS=("8.8.8.8" "8.8.4.4")
+OSTEMPLATE="debian/bookworm/amd64"
 IS_PRIVILEGED=true
 ROOT_PASSWORD="000000"
+IP_ADDRESS="192.168.1.100"
+BRIDGE="vmbr0"
 
 # ============ Wizard Steps ============
 echo "🚀 Welcome to the FitMe Prox Deployment Wizard"
 
-# Choose Container Name
 read -p "Enter container name [default: $CONTAINER_NAME]: " input
 CONTAINER_NAME=${input:-$CONTAINER_NAME}
 
-# Choose OS Template
-read -p "Choose OS template [default: $OSTEMPLATE]: " input
-OSTEMPLATE=${input:-$OSTEMPLATE}
-
-# Choose Privileged or Unprivileged
 read -p "Should the container be privileged? [y/n] (default: y): " answer
 IS_PRIVILEGED=$(echo "$answer" | tr '[:upper:]' '[:lower:]')
 IS_PRIVILEGED=${IS_PRIVILEGED:-yes}
 
-# Set Root Password
-while true; do
-  read -p "Enter root password for the container: " ROOT_PASSWORD
-  read -p "Re-enter root password: " CONFIRM_PASSWORD
-  if [[ "$ROOT_PASSWORD" == "$CONFIRM_PASSWORD" ]]; then
-    break
-  else
+read -p "Enter root password for the container: " ROOT_PASSWORD
+read -p "Re-enter root password: " CONFIRM_PASSWORD
+if [[ "$ROOT_PASSWORD" != "$CONFIRM_PASSWORD" ]]; then
     msg_error "Passwords do not match. Please try again."
-  fi
-done
+fi
 
-# ============ Create LXC Container (Proxmox 8.x compatible) ============
-lxc-create -n "$CONTAINER_NAME" -t download -- --dist debian --release bookworm --arch amd64 \
-  --storage local-lvm \
-  --size "$DISK_SIZE" \
-  --userpasswd "$ROOT_PASSWORD" \
-  --rootfs-size "$DISK_SIZE" \
-  --network-bridge "$BRIDGE" \
-  --network-ip "$IP_ADDRESS" \
-  --network-gateway "192.168.1.1" \
-  --network-dns "${DNS_SERVERS[*]}" \
-  --privileged $([[ "$IS_PRIVILEGED" == "yes" ]] && echo "1" || echo "0") || msg_error "Failed to create container."
+# ============ Create Container (Proxmox 8.x compatible) ============
+header_info "Creating LXC Container..."
+
+lxc-create -n "$CONTAINER_NAME" -t download -- --dist debian --release bookworm --arch amd64 || msg_error "Failed to create container."
+
+qm set "$CONTAINER_ID" --unprivileged $([[ "$IS_PRIVILEGED" == "no" ]] && echo "1" || echo "0") || msg_error "Failed to set unprivileged mode."
+
+qm set "$CONTAINER_ID" --memory "$var_ram" --swap 512 --cores "$var_cpu" || msg_error "Failed to set container resources."
+
+qm set "$CONTAINER_ID" --net0 name=eth0,bridge=$BRIDGE,model=virtio || msg_error "Failed to configure network."
+
+qm set "$CONTAINER_ID" --ipconfig0 ip=$IP_ADDRESS,gw=192.168.1.1,dns=8.8.8.8,dns=8.8.4.4 || msg_error "Failed to set IP configuration."
 
 # Start container
-lxc-start -n "$CONTAINER_NAME" || msg_error "Failed to start container."
+qm start "$CONTAINER_ID" || msg_error "Failed to start container."
 
 # Wait until online
 until ping -c 1 "$IP_ADDRESS" &> /dev/null; do
